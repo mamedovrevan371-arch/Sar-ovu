@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="az"><head><meta charset="utf-8"><title>VR Cərrah 3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+html,body{height:100%;margin:0;background:#0a141c;color:#e8f0ff;font-family:system-ui,sans-serif;overflow:hidden;touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+video{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a141cf2;padding:env(safe-area-inset-top) 18px env(safe-area-inset-bottom);text-align:center;z-index:5}
+#ov div{max-width:420px}h1{margin:0 0 8px;font-size:26px}p{color:#a9b8d0;font-size:14px;line-height:1.5;margin:6px 0}
+button{background:#2b9bd6;color:#fff;border:0;border-radius:12px;padding:12px 22px;font-size:16px;margin-top:12px}
+#vb{position:fixed;bottom:4px;left:50%;transform:translateX(-50%);z-index:4;padding:3px 10px;font-size:11px;margin:0;opacity:.45;background:#334}
+</style></head><body>
+<canvas id="c"></canvas><video id="v" playsinline muted></video>
+<button id="vb">VR / 2D</button>
+<div id="ov"><div>
+<h1>🩺 VR Cərrah 3D</h1>
+<p>Telefonu yan tutub VR gözlüyə (Cardboard) yerləşdir. Arxa kamera əlini izləyir.</p>
+<p><b>Əl izləmə:</b> əlini kameradan 30–50 sm aralıda aç. Baş və şəhadət barmağını birləşdir (çimdik) = alət götür, burax = yerə qoy. Alət yaradakı hədəf üzərində durduqca iş görülür.</p>
+<p>İzləmə işləməsə: aləti 1 san. izlə və ya ekrana toxun.</p>
+<button id="go">Başla</button><p id="msg" style="color:#f6ad55"></p>
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+<script>
+const $=id=>document.getElementById(id),vid=$('v'),V=THREE.Vector3,PI=Math.PI;
+const R=new THREE.WebGLRenderer({canvas:$('c'),antialias:true});
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;R.outputEncoding=THREE.sRGBEncoding;R.toneMapping=THREE.ACESFilmicToneMapping;R.setPixelRatio(Math.min(devicePixelRatio,2));
+const sc=new THREE.Scene();sc.background=new THREE.Color(0x0a141c);sc.fog=new THREE.Fog(0x0a141c,3,7);
+const cam=new THREE.PerspectiveCamera(55,1,.05,20);sc.add(cam);
+const M=(c,r=.5,m=0)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+const add=(g,m,x=0,y=0,z=0)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;sc.add(o);return o};
+const B=(x,y,z)=>new THREE.BoxGeometry(x,y,z),CY=(r,l)=>new THREE.CylinderGeometry(r,r,l,14),SP=r=>new THREE.SphereGeometry(r,16,12);
+/* lights & room */
+sc.add(new THREE.HemisphereLight(0x8fb4d8,0x101820,.6));
+const sp=new THREE.SpotLight(0xfff4e0,1.9,7,.6,.55,1.2);sp.position.set(.4,2.3,.7);sp.target.position.set(0,.2,.2);sc.add(sp,sp.target);
+sp.castShadow=true;sp.shadow.mapSize.set(1024,1024);
+add(new THREE.PlaneGeometry(14,14),M(0x16222c,.8)).rotation.x=-PI/2;sc.children.at?0:0;
+const fl=sc.children[sc.children.length-1];fl.position.y=-.9;
+add(B(2.8,.1,1.3),M(0xaab4c0,.3,.8),0,-.05,.2);add(CY(.09,.85),M(0x6b7684,.4,.8),0,-.5,.2);
+/* patient */
+const skin=M(0xe0a98a,.6),torso=add(SP(1),skin,0,.12,0);torso.scale.set(.85,.16,.4);
+add(SP(.17),skin,-1.02,.16,0);add(SP(.18),M(0x2b2018,.9),-1.06,.2,0);
+[-1,1].forEach(s=>{const a=add(CY(.055,.85),skin,.05,.07,s*.5);a.rotation.z=PI/2;const l=add(CY(.09,.9),skin,1.25,.12,s*.17);l.rotation.z=PI/2});
+add(B(1,.035,1.05),M(0x2f9e7a,.9),1.05,.245,0);add(B(.3,.03,1),M(0x2f9e7a,.9),-.55,.3,0).visible=false;
+const wound=add(new THREE.CircleGeometry(1,32),M(0x6a0f12,.2),0,.2855,0);wound.rotation.x=-PI/2;wound.scale.set(.34,.055,1);wound.castShadow=false;
+const guide=add(B(.6,.002,.004),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.5}),0,.2855,0);
+const incG=B(1,.006,.012);incG.translate(.5,0,0);const inc=add(incG,M(0x5a0a0d,.2),-.3,.2865,0);
+/* stages */
+const ST=[{t:0,m:'Skalpellə xətt boyunca kəs',r:.1},{t:1,m:'Pinsetlə qəlpələri çıxar',r:.09},{t:2,m:'İynə ilə tikişləri vur',r:.09},{t:3,m:'Yaranı plastırla bağla',r:.2}];
+const TG=[[-.3,-.15,0,.15,.3].map(x=>new V(x,.285,0)),[[-.2,.02],[.05,-.03],[.22,.03]].map(a=>new V(a[0],.285,a[1])),[-.25,-.08,.08,.25].map(x=>new V(x,.285,0)),[new V(0,.285,0)]];
+let pr=TG.map(a=>a.map(()=>0));
+const mkMat=new THREE.MeshBasicMaterial({color:0x4fd1c5}),MK=TG.map(a=>a.map(p=>{const m=add(SP(.012),mkMat,p.x,p.y+.01,p.z);m.castShadow=false;return m}));
+const SH=TG[1].map(p=>{const m=add(new THREE.OctahedronGeometry(.016),M(0x8a96a8,.3,.7),p.x,.28,p.z);return m});
+const STI=TG[2].map(p=>{const m=add(CY(.003,.11),M(0x15151c,.5),p.x,.291,p.z);m.rotation.x=PI/2;return m});
+const band=add(B(.34,.012,.17),M(0xf1d6b0,.7),0,.292,0);const pad=new THREE.Mesh(B(.16,.012,.1),M(0xfafafa,.9));pad.position.y=.01;band.add(pad);
+/* tray & tools */
+add(B(1.5,.02,.5),M(0x2a3f55,.3,.6),0,.01,.78);
+const steel=M(0xd5dce4,.2,.9);
+function mk(i){const g=new THREE.Group(),a=(geo,mat,x,y,z,rx,ry)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.rotation.set(rx||0,ry||0,0);m.castShadow=true;g.add(m)};
+ if(i==0){a(CY(.011,.3),steel,0,0,.2,PI/2);a(B(.003,.02,.08),steel,0,0,.04)}
+ if(i==1){a(B(.008,.003,.3),steel,.007,0,.15,0,-.03);a(B(.008,.003,.3),steel,-.007,0,.15,0,.03)}
+ if(i==2){a(new THREE.TorusGeometry(.04,.003,8,20,PI*1.1),steel,-.04,0,0,PI/2);a(CY(.0015,.22),M(0x2244aa,.8),-.078,0,.1,PI/2)}
+ if(i==3){a(B(.13,.012,.06),M(0xf1d6b0,.7),0,0,0);a(B(.05,.014,.05),M(0xfafafa,.9),0,.002,0)}
+ sc.add(g);return g}
+const RP=[-.5,-.17,.17,.5].map(x=>new V(x,.04,.62)),TL=[0,1,2,3].map(mk);TL.forEach((g,i)=>g.position.copy(RP[i]));
+const ring=add(new THREE.TorusGeometry(.07,.004,8,32),new THREE.MeshBasicMaterial({color:0xf6c453}),0,.03,.62);ring.rotation.x=PI/2;ring.castShadow=false;
+/* cursor, hand ghost, blood */
+const cursor=new THREE.Mesh(SP(.014),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.85}));sc.add(cursor);
+const lmG=new THREE.Group(),lmM=new THREE.MeshBasicMaterial({color:0x4fd1c5,transparent:true,opacity:.55});
+for(let i=0;i<21;i++)lmG.add(new THREE.Mesh(SP(.007),lmM));sc.add(lmG);
+const bl=[],blG=SP(.006),blM=M(0x8e0f14,.15);
+/* HUD */
+const hc=document.createElement('canvas');hc.width=512;hc.height=160;const hx=hc.getContext('2d'),ht=new THREE.CanvasTexture(hc);ht.encoding=THREE.sRGBEncoding;
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(.9,.28),new THREE.MeshBasicMaterial({map:ht,transparent:true,depthTest:false}));hud.position.set(0,.5,-1.2);hud.renderOrder=9;cam.add(hud);
+/* state */
+let st=0,held=-1,bpm=80,note='',noteT=0,vr=true,tmode='dwell',touch=false,prev=false,dw={i:-1,t:0},camOn=false,asp=1,work=false,lmN=null,bt=0;
+const cur={x:0,y:-.2,vis:false,pinch:false};
+const tv=new V(),nd=p=>{tv.copy(p).project(cam);return[tv.x,tv.y]},dd=(a,b,c,e)=>Math.hypot((a-c)*asp,b-e);
+const pl=new THREE.Plane(new V(0,1,0),-.33),rc=new THREE.Raycaster(),hit=new V(),tp=new V(),O=new V(0,.28,0);
+const say=t=>{note=t;noteT=2.2},reset=()=>{st=0;held=-1;bpm=80;pr=TG.map(a=>a.map(()=>0))};
+const resize=()=>R.setSize(innerWidth,innerHeight);addEventListener('resize',resize);resize();$('vb').onclick=()=>vr=!vr;
+/* input */
+function tpos(e){const w=vr?innerWidth/2:innerWidth,x=vr?e.clientX%w:e.clientX;cur.x=x/w*2-1;cur.y=-(e.clientY/innerHeight*2-1);cur.vis=true}
+const cv=$('c');cv.addEventListener('pointerdown',e=>{if(st>=4){reset();return}touch=true;tpos(e);cur.pinch=true});
+cv.addEventListener('pointermove',e=>{if(touch)tpos(e)});addEventListener('pointerup',()=>{if(touch){touch=false;cur.pinch=false}});
+const m1=v=>Math.max(0,Math.min(1,(v-.1)/.8)),nm=v=>(m1(v)-.5)*2;
+function setCur(x,y,p){cur.x+=(x-cur.x)*.5;cur.y+=(y-cur.y)*.5;cur.pinch=p;cur.vis=true}
+async function startMP(){
+ const h=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+ h.setOptions({maxNumHands:1,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});
+ h.onResults(r=>{if(touch)return;const l=r.multiHandLandmarks&&r.multiHandLandmarks[0];
+  if(!l){cur.vis=false;cur.pinch=false;lmN=null;return}
+  lmN=l.map(p=>[nm(p.x),-nm(p.y)]);const a=l[4],b=l[8],z=Math.hypot(l[0].x-l[9].x,l[0].y-l[9].y)||.1;
+  setCur((lmN[4][0]+lmN[8][0])/2,(lmN[4][1]+lmN[8][1])/2,Math.hypot(a.x-b.x,a.y-b.y)/z<.33)});
+ await Promise.race([h.initialize(),new Promise((_,j)=>setTimeout(j,9000))]);tmode='pinch';
+ (async function lp(){try{if(vid.readyState>=2)await h.send({image:vid})}catch(e){}requestAnimationFrame(lp)})();
+}
+const tc=document.createElement('canvas');tc.width=64;tc.height=48;const tx=tc.getContext('2d',{willReadFrequently:true});
+function startColor(){tmode='dwell';setInterval(()=>{if(touch||vid.readyState<2)return;tx.drawImage(vid,0,0,64,48);
+ const D=tx.getImageData(0,0,64,48).data,P=[];let my=99;
+ for(let i=0;i<D.length;i+=4){const r=D[i],g=D[i+1],b=D[i+2],Y=.299*r+.587*g+.114*b,cb=128-.1687*r-.3313*g+.5*b,cr=128+.5*r-.4187*g-.0813*b;
+  if(Y>50&&cb>77&&cb<127&&cr>133&&cr<173){const n=i/4,y=(n/64)|0;P.push(n%64,y);if(y<my)my=y}}
+ let sx=0,sy=0,c=0;for(let i=0;i<P.length;i+=2)if(P[i+1]<my+9){sx+=P[i];sy+=P[i+1];c++}
+ if(P.length/2>45&&c)setCur(nm(sx/c/64),-nm(sy/c/48),false);else cur.vis=false},66)}
+$('go').onclick=async()=>{
+ try{document.documentElement.requestFullscreen&&await document.documentElement.requestFullscreen();screen.orientation&&await screen.orientation.lock('landscape')}catch(e){}
+ try{vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:640,height:480},audio:false});await vid.play();camOn=true;
+  try{if(!window.Hands)throw 0;await startMP()}catch(e){startColor();say('Sadə izləmə: aləti 1 san. izlə')}
+ }catch(e){say('Kamera yoxdur: toxunaraq oyna')}
+ $('ov').style.display='none'};
+/* logic */
+function update(dt){
+ if(noteT>0)noteT-=dt;work=false;if(st>=4)return;
+ const s=ST[st],mode=touch?'pinch':tmode,w=nd(O);
+ if(held>=0&&held!==s.t&&cur.vis&&dd(cur.x,cur.y,w[0],w[1])<.3)bpm+=28*dt;else bpm+=(80-bpm)*Math.min(1,dt*.8);
+ if(bpm>=170){say('Pasiyent həyəcanlandı! Yenidən cəhd et');bpm=80;held=-1;pr[st]=TG[st].map(()=>0)}
+ if(cur.vis){const i=RP.findIndex(p=>{const a=nd(p);return dd(cur.x,cur.y,a[0],a[1])<.13});
+  if(mode==='pinch'){if(cur.pinch&&!prev&&i>=0)held=i;if(!cur.pinch&&prev)held=-1}
+  else if(i>=0){if(dw.i===i)dw.t+=dt;else{dw.i=i;dw.t=0}if(dw.t>.8){held=i;dw.t=0}}else{dw.i=-1;dw.t=0}
+  prev=cur.pinch}else if(mode==='pinch'&&prev){held=-1;prev=false}
+ if(held===s.t&&cur.vis){TG[st].forEach((q,j)=>{if(pr[st][j]>=1)return;const a=nd(q);
+  if(dd(cur.x,cur.y,a[0],a[1])<s.r){pr[st][j]=Math.min(1,pr[st][j]+dt*1.6);work=true;
+   if(st===0){bt-=dt;if(bt<0){bt=.07;const m=new THREE.Mesh(blG,blM);m.position.copy(q);m.position.y=.29;m.v=new V((Math.random()-.5)*.15,.25,(Math.random()-.5)*.15);sc.add(m);bl.push(m)}}}
+  else pr[st][j]=Math.max(0,pr[st][j]-dt*.4)});
+  if(pr[st].every(v=>v>=1)){st++;held=-1;say(st>=4?'':'Əla! Növbəti mərhələ')}}
+}
+function sync(T){
+ wound.visible=st>=1;guide.visible=st===0;inc.scale.x=Math.max(.0001,.6*pr[0].reduce((a,b)=>a+b,0)/5);
+ MK.forEach((a,s)=>a.forEach((m,j)=>{m.visible=s===st&&pr[s][j]<1;m.scale.setScalar(1+.25*Math.sin(T*6)+pr[s][j]*1.5)}));
+ SH.forEach((m,j)=>m.visible=st===1&&pr[1][j]<1);STI.forEach((m,j)=>m.visible=pr[2][j]>=1);band.visible=st>=4;
+ ring.visible=st<4&&held<0;if(st<4){ring.position.x=RP[ST[st].t].x;ring.scale.setScalar(1+.12*Math.sin(T*5))}
+ for(let i=bl.length-1;i>=0;i--){const m=bl[i];m.v.y-=2*.016;m.position.addScaledVector(m.v,.016);if(m.position.y<.285){sc.remove(m);bl.splice(i,1)}}
+}
+function drawHUD(T){
+ hx.clearRect(0,0,512,160);hx.fillStyle='rgba(8,16,24,.72)';hx.beginPath();hx.roundRect(0,0,512,160,18);hx.fill();
+ hx.textAlign='center';hx.fillStyle='#e8f0ff';hx.font='600 25px system-ui';hx.fillText(st<4?ST[st].m:'Əməliyyat uğurlu! 🎉',256,38);
+ if(noteT>0){hx.fillStyle='#f6ad55';hx.font='18px system-ui';hx.fillText(note,256,66)}
+ else if(st>=4){hx.fillStyle='#a9b8d0';hx.font='17px system-ui';hx.fillText('Yenidən başlamaq üçün toxun',256,66)}
+ else if(dw.t>0){hx.fillStyle='#f6c453';hx.fillRect(176,56,160*dw.t/.8,6)}
+ const col=bpm>130?'#ff6b6b':'#4ade80';hx.strokeStyle=col;hx.lineWidth=2.5;hx.beginPath();
+ for(let x=0;x<370;x+=3){const ph=((T-(370-x)*.012)*bpm/60)%1,v=Math.exp(-((ph-.3)*40)**2)-.2*Math.exp(-((ph-.38)*30)**2)+.15*Math.exp(-((ph-.6)*12)**2);hx.lineTo(14+x,125-v*40)}
+ hx.stroke();hx.fillStyle=col;hx.font='700 32px system-ui';hx.fillText('❤ '+(bpm|0),450,120);ht.needsUpdate=true}
+/* loop */
+let last=performance.now();
+(function frame(t){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000),T=t/1000;last=t;
+ const w=vr?innerWidth/2:innerWidth,h=innerHeight;asp=w/h;cam.aspect=asp;cam.updateProjectionMatrix();
+ cam.position.set(0,1.55,1.55);cam.lookAt(0,.05,.38);cam.updateMatrixWorld();
+ update(dt);sync(T);
+ rc.setFromCamera({x:cur.x,y:cur.y},cam);const ok=cur.vis&&!!rc.ray.intersectPlane(pl,hit);
+ TL.forEach((g,i)=>{if(i===held&&ok){tp.set(hit.x,hit.y-(work?.03:0),hit.z);g.position.lerp(tp,.5);g.rotation.x+=(-.6-g.rotation.x)*.3}
+  else{g.position.lerp(RP[i],.25);g.rotation.x+=(0-g.rotation.x)*.3}});
+ cursor.visible=ok&&held<0;if(ok){cursor.position.copy(hit);cursor.material.color.set(cur.pinch?0xf6ad55:0xffffff);cursor.scale.setScalar(1+dw.t*2)}
+ lmG.visible=!!lmN&&!touch&&tmode==='pinch';if(lmG.visible)lmN.forEach((p,i)=>{rc.setFromCamera({x:p[0],y:p[1]},cam);rc.ray.intersectPlane(pl,lmG.children[i].position)});
+ drawHUD(T);R.setScissorTest(true);
+ (vr?[-1,1]:[0]).forEach((e,i)=>{R.setViewport(i*w,0,w,h);R.setScissor(i*w,0,w,h);cam.position.x=e*.035;cam.lookAt(0,.05,.38);cam.updateMatrixWorld();R.render(sc,cam)});
+})(last);
+</script></body></html>
